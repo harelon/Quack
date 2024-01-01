@@ -22,11 +22,14 @@ class MapRange:
     start: int
     end: int
 
-def get_wanted_pages(data: Dict[int, bytes]) -> List[MapRange]:
+def get_wanted_pages(data: Dict[int, int]) -> List[MapRange]:
     page_mapping_list: List[MapRange] = []
-    for address, content in data.items():
+    sorted_keys = list(data.keys())
+    sorted_keys.sort()
+    for address in sorted_keys:
+        content_len = data[address]
         min_mapping = round_offset_to_page(address, False)
-        max_mapping = round_offset_to_page(address + len(content), True)
+        max_mapping = round_offset_to_page(address + content_len, True)
         is_contained = False
         for item in page_mapping_list:
             # range is contained entirely
@@ -71,6 +74,8 @@ class Emulator:
         self.endianess = inf_struct.is_be()
         self.endianess_string = "big" if self.endianess else "little"
         # TODO init global offset table for mips
+        # TODO Map imports to zero
+        # TODO implement usercall
         self.mu: unicorn.Uc = unicorn.Uc(unicorn_arch, mode | (unicorn.UC_MODE_BIG_ENDIAN if self.endianess else unicorn.UC_MODE_LITTLE_ENDIAN))
         self.param_address = 0x1000_0000
         self.stack_address = 0x2000_0000
@@ -84,9 +89,9 @@ class Emulator:
         try:
             self.param_counter = 0
             self.function = function
-            mappings = get_wanted_pages(function.memory_mappings)
-            # print([hex(map.start) + " " + hex(map.end) for map in  mappings])
-            # print({hex(key): len(value) for key, value in function.memory_mappings.items()})
+            mappings = get_wanted_pages({address: len(content) for address, content in function.memory_mappings.items()})
+            #print([hex(map.start) + " " + hex(map.end) for map in  mappings])
+            #print({hex(key): len(value) for key, value in function.memory_mappings.items()})
             for map in mappings:
                 size = map.end - map.start
                 memory_mappings.append((map.start, size))
