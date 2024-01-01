@@ -1,0 +1,6 @@
+isalpha
+toupper
+isupper
+memcpy
+memzero
+memmem
