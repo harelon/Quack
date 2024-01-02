@@ -20,9 +20,9 @@ class TestManager:
         with emulator.init_function(function):
             for name, tests in self._testers.items():
                 if len(tests.prototype) != function.param_count:
-                    # print(f"skipped testing function {name}")
+                    print(f"skipped testing function {name}")
                     continue
-                # print(f"testing function {name}")
+                print(f"testing function {name}")
                 if all([self.__run(emulator, test, tests.prototype) for test in tests.tests]):
                     return name
         return None

@@ -40,6 +40,7 @@ class QuackPlugin(ida_idaapi.plugin_t):
             ea = current_item.start_ea
             if ea in memory_mappings.keys():
                 continue
+            # TODO fix 0x110170A20 / tanf bug in msvcrt
             tails = {} if not is_func else {tail.start_ea: tail for tail in current_item.tails}
             current_disas = ea
             while current_disas < current_item.end_ea:
@@ -83,7 +84,7 @@ class QuackPlugin(ida_idaapi.plugin_t):
                 func_data = ida_typeinf.func_type_data_t()
                 func.type.get_func_details(func_data)
                 args_count = func_data.size()
-                cc = func_data.cc
+                cc = func_data.cc & ida_typeinf.CM_CC_MASK
             else:
                 print(f"no prototype initialized for function 0x{current_func.start_ea:x} and no decompiler")
                 return 0

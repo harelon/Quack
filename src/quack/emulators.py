@@ -2,6 +2,7 @@ import unicorn
 
 import ida_idp
 import ida_idaapi
+import ida_hexrays
 import ida_typeinf
 
 from enum import Enum, auto
@@ -98,12 +99,41 @@ class Emulator:
                 self.mu.mem_map(map.start, size)
             for address, content in function.memory_mappings.items():
                 self.mu.mem_write(address, content)
+            self.__setup_calling_convention(function)
             yield
         finally:
             for mapped_memory in memory_mappings:
                 self.mu.mem_unmap(*mapped_memory)
             memory_mappings.clear()
-    
+
+    def __setup_calling_convention(self, function: Function):
+        if function.calling_convention != ida_typeinf.CM_CC_SPECIAL:
+            try:
+                self.calling_convention: Dict[int, Dict[LocationType, List[int]]] = \
+                    calling_conventions[self.arch][self.bitness][ida_typeinf.default_compiler()][function.calling_convention]
+            except KeyError:
+                print("The current compiler has no suitable calling convention for the current architecture")
+        else:
+            # TODO Research how the ida_typeinf.idc_get_type_raw_works() to save decompiling and enable emulating user call without decompiler
+            arch_map = ida2unicorn_register_map[self.arch]
+            func = ida_hexrays.decompile(function.start_address)
+            func_data = ida_typeinf.func_type_data_t()
+            func.type.get_func_details(func_data)
+            self.calling_convention: Dict[LocationType, List[int]]= {
+                LocationType.arg : [
+
+                ],
+                LocationType.result : [
+
+                ]
+            }
+            #func.get_func_details(func_data)
+            item: ida_typeinf.argloc_t = None
+            self.calling_convention[LocationType.result].append(arch_map[func_data.retloc.reg1()][func_data.rettype.get_size()])
+            for item in func_data:
+                if item.argloc.atype() == ida_typeinf.ALOC_REG1:
+                    self.calling_convention[LocationType.arg].append(arch_map[item.argloc.reg1()][item.type.get_size()])
+
     def __resolve_param(self, param: ParamType, content: Any):
         if param in frozenset((ParamType.INT, ParamType.UINT)):
             return self.pointer_size, mask_value(content, self.pointer_size)
@@ -120,10 +150,9 @@ class Emulator:
         elif param == ParamType.BYTES:
             return len(content), content.encode("ascii") + b"\0" if type(content) == str else content
         
-    def __init_param(self, index: int, param_type: ParamType, content: Any) -> None:
-        args = self.calling_convention[self.function.calling_convention][LocationType.arg]
+    def __init_param(self, index: int, param_type: ParamType, content: Any, calling_convention: List[int]) -> None:
         param_size, param_content = self.__resolve_param(param_type, content)
-        if index >= len(args):
+        if index >= len(calling_convention):
             size = param_size
             value = param_content
             if param_type == ParamType.BYTES:
@@ -140,7 +169,7 @@ class Emulator:
             self.mu.mem_write(self.stack_address, value.to_bytes(size, self.endianess_string))
             self.stack_address += self.pointer_size
         else:
-            current_param_reg: int = args[index]
+            current_param_reg: int = calling_convention[index]
             if param_type == ParamType.BYTES:
                 param_size = round_offset_to_page(param_size)
                 self.mu.mem_map(self.param_address, param_size)
@@ -156,16 +185,12 @@ class Emulator:
     @contextmanager
     def run(self, prototype: FunctionPrototype, params: List[Any]) -> None:
         try:
-            self.calling_convention: Dict[int, Dict[LocationType, List[int]]] = calling_conventions[self.arch][self.bitness][ida_typeinf.default_compiler()]
-        except KeyError:
-            print("The current compiler has no suitable calling convention for the current architecture")
-        try:
             self.result = 0
             self.out_params: List[Any] = []
             self.params = params
             original_stack_address = self.stack_address
             for i, param in enumerate(params):
-                self.__init_param(i, prototype[i], param)
+                self.__init_param(i, prototype[i], param, self.calling_convention[LocationType.arg])
             stack_size = self.stack_address - original_stack_address
             try:
                 # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RDI)))
@@ -195,7 +220,7 @@ class Emulator:
                 # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RCX)))
                 #print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RAX)))
                 pass
-            reg = self.calling_convention[self.function.calling_convention][LocationType.result][0]
+            reg = self.calling_convention[LocationType.result][0]
             self.result = self.mu.reg_read(reg)
             if prototype.return_type.is_signed:
                 size, value = self.__resolve_param(prototype.return_type, self.result)
@@ -215,13 +240,6 @@ class Emulator:
     def read_mem(self, offset: int, size: int) -> bytearray:
         return self.mu.mem_read(offset, size)
 
-    def get_result(self, size) -> int:
-        if size == -1:
-            size = self.pointer_size
-        reg = self.calling_convention[self.function.calling_convention][LocationType.result][0]
-        result = self.mu.reg_read(reg)
-        return mask_value(result, size)
-
 arch_info = {
     ida_idp.PLFM_386 :{
         32:  (unicorn.UC_ARCH_X86, unicorn.UC_MODE_32, unicorn.x86_const.UC_X86_REG_ESP, 4),
@@ -237,6 +255,7 @@ arch_info = {
     }
 }
 
+# TODO transfer all the dicts to another python file
 calling_conventions = {
     ida_idp.PLFM_386: {
         32: {
@@ -381,6 +400,117 @@ calling_conventions = {
                 }
             },
         }
+    }
+}
+
+# TODO add the register mappings from ida to unicorn for arm and mips
+ida2unicorn_register_map = {
+    ida_idp.PLFM_386 : {
+        0: {
+            8: unicorn.x86_const.UC_X86_REG_RAX,
+            4: unicorn.x86_const.UC_X86_REG_EAX,
+            2: unicorn.x86_const.UC_X86_REG_AX,
+        },
+        16: {
+            1: unicorn.x86_const.UC_X86_REG_AL
+        },
+        3: {
+            8: unicorn.x86_const.UC_X86_REG_RBX,
+            4: unicorn.x86_const.UC_X86_REG_EBX,
+            2: unicorn.x86_const.UC_X86_REG_BX,
+        },
+        19: {
+            1: unicorn.x86_const.UC_X86_REG_BL
+        },
+        1: {
+            8: unicorn.x86_const.UC_X86_REG_RCX,
+            4: unicorn.x86_const.UC_X86_REG_ECX,
+            2: unicorn.x86_const.UC_X86_REG_CX,
+        },
+        17: {
+            1: unicorn.x86_const.UC_X86_REG_CL
+        },
+        2: {
+            8: unicorn.x86_const.UC_X86_REG_RDX,
+            4: unicorn.x86_const.UC_X86_REG_EDX,
+            2: unicorn.x86_const.UC_X86_REG_DX,
+        },
+        18: {
+            1: unicorn.x86_const.UC_X86_REG_DL
+        },
+        7: {
+            8: unicorn.x86_const.UC_X86_REG_RDI,
+            4: unicorn.x86_const.UC_X86_REG_EDI,
+            2: unicorn.x86_const.UC_X86_REG_DI,
+        },
+        27: {
+            1: unicorn.x86_const.UC_X86_REG_DIL,
+        },
+        6: {
+            8: unicorn.x86_const.UC_X86_REG_RSI,
+            4: unicorn.x86_const.UC_X86_REG_ESI,
+            2: unicorn.x86_const.UC_X86_REG_SI,
+        },
+        26: {
+            1: unicorn.x86_const.UC_X86_REG_SIL,
+        },
+        8: {
+            8: unicorn.x86_const.UC_X86_REG_R8,
+            4: unicorn.x86_const.UC_X86_REG_R8D,
+            2: unicorn.x86_const.UC_X86_REG_R8W,
+            1: unicorn.x86_const.UC_X86_REG_R8B,
+        },
+        9: {
+            8: unicorn.x86_const.UC_X86_REG_R9,
+            4: unicorn.x86_const.UC_X86_REG_R9D,
+            2: unicorn.x86_const.UC_X86_REG_R9W,
+            1: unicorn.x86_const.UC_X86_REG_R9B,
+        },
+        10: {
+            8: unicorn.x86_const.UC_X86_REG_R10,
+            4: unicorn.x86_const.UC_X86_REG_R10D,
+            2: unicorn.x86_const.UC_X86_REG_R10W,
+            1: unicorn.x86_const.UC_X86_REG_R10B,
+        },
+        11: {
+            8: unicorn.x86_const.UC_X86_REG_R11,
+            4: unicorn.x86_const.UC_X86_REG_R11D,
+            2: unicorn.x86_const.UC_X86_REG_R11W,
+            1: unicorn.x86_const.UC_X86_REG_R11B,
+        },
+        12: {
+            8: unicorn.x86_const.UC_X86_REG_R12,
+            4: unicorn.x86_const.UC_X86_REG_R12D,
+            2: unicorn.x86_const.UC_X86_REG_R12W,
+            1: unicorn.x86_const.UC_X86_REG_R12B,
+        },
+        13: {
+            8: unicorn.x86_const.UC_X86_REG_R13,
+            4: unicorn.x86_const.UC_X86_REG_R13D,
+            2: unicorn.x86_const.UC_X86_REG_R13W,
+            1: unicorn.x86_const.UC_X86_REG_R13B,
+        },
+        14: {
+            8: unicorn.x86_const.UC_X86_REG_R14,
+            4: unicorn.x86_const.UC_X86_REG_R14D,
+            2: unicorn.x86_const.UC_X86_REG_R14W,
+            1: unicorn.x86_const.UC_X86_REG_R14B,
+        },
+        15: {
+            8: unicorn.x86_const.UC_X86_REG_R15,
+            4: unicorn.x86_const.UC_X86_REG_R15D,
+            2: unicorn.x86_const.UC_X86_REG_R15W,
+            1: unicorn.x86_const.UC_X86_REG_R15B,
+        },
+        64: {
+            8: unicorn.x86_const.UC_X86_REG_XMM0
+        },
+        65: {
+            8: unicorn.x86_const.UC_X86_REG_XMM1
+        },
+        66: {
+            8: unicorn.x86_const.UC_X86_REG_XMM2
+        },
     }
 }
 
