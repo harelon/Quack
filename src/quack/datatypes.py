@@ -23,6 +23,7 @@ class ParamType(Enum):
     INT = auto()
     UINT = auto()
     BYTES = auto()
+    COMPOUND = auto()
     
     @property
     def is_signed(self) -> bool:
@@ -66,6 +67,7 @@ class Pointer:
         self.address = address
         self.__emulator = emulator
     
+    # TODO enable reading of compound types
     def get_pointed(self, size: int) -> bytearray:
         return self.__emulator.read_mem(self.address, size)
 

@@ -16,14 +16,14 @@ class TestManager:
         self._testers[name] = Tests(prototype=prototype)
         return self._testers[name]
     
-    def test(self, emulator: Emulator, function: Function) -> bool:
+    def test(self, emulator: Emulator, function: Function) -> str | None:
         with emulator.init_function(function):
             for name, tests in self._testers.items():
                 if len(tests.prototype) != function.param_count:
-                    print(f"skipped testing function {name}")
+                    #print(f"skipped testing function {name}")
                     continue
-                print(f"testing function {name}")
-                if all([self.__run(emulator, test, tests.prototype) for test in tests.tests]):
+                #print(f"testing function {name}")
+                if all(self.__run(emulator, test, tests.prototype) for test in tests.tests):
                     return name
         return None
     

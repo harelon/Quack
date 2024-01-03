@@ -10,6 +10,8 @@ import ida_kernwin
 import ida_typeinf
 import ida_hexrays
 
+from typing import Dict
+
 def get_string_list_count(string_list: bytes):
     current_offset = 0
     string_counter = 0
@@ -29,7 +31,7 @@ class QuackPlugin(ida_idaapi.plugin_t):
         self.emulator = emulators.get_emulator()
         return ida_idaapi.PLUGIN_KEEP
 
-    def __generate_memory_mappings(self, current_func):
+    def __generate_memory_mappings(self, current_func: ida_funcs.func_t) -> Dict[int, bytes] | None:
         current_insn = ida_ua.insn_t()
         memory_mappings = {}
         # map data used by the function such as jump tables
@@ -40,8 +42,11 @@ class QuackPlugin(ida_idaapi.plugin_t):
             ea = current_item.start_ea
             if ea in memory_mappings.keys():
                 continue
-            # TODO fix 0x110170A20 / tanf bug in msvcrt
-            tails = {} if not is_func else {tail.start_ea: tail for tail in current_item.tails}
+            current_tails = current_item.tails
+            if None in current_tails:
+                print("Cannot calculate function dependencies, please reanalyze program")
+                return None
+            tails = {} if not is_func else {tail.start_ea: tail for tail in current_tails}
             current_disas = ea
             while current_disas < current_item.end_ea:
                 data = ida_xref.get_first_dref_from(current_disas)
@@ -94,8 +99,10 @@ class QuackPlugin(ida_idaapi.plugin_t):
             cc = convention[1] & ida_typeinf.CM_CC_MASK
             args_count = get_string_list_count(args)
 
-        testing_function = datatypes.Function(args_count, cc, current_func.start_ea, self.__generate_memory_mappings(current_func))
-        print(f"Suggested name is {self.__manager.test(self.emulator, testing_function)}")
+        mappings = self.__generate_memory_mappings(current_func)
+        if mappings is not None:
+            testing_function = datatypes.Function(args_count, cc, current_func.start_ea, mappings)
+            print(f"Suggested name is {self.__manager.test(self.emulator, testing_function)}")
         return 0
 
     def term(self):

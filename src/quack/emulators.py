@@ -5,11 +5,11 @@ import ida_idaapi
 import ida_hexrays
 import ida_typeinf
 
-from enum import Enum, auto
 from typing import List, Dict, Tuple, Any
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from quack.unicorn_2_ida_consts import calling_conventions, x86_x64_reg_map, arch_info, LocationType
 from quack.datatypes import Function, ParamType, FunctionPrototype, Pointer
 
 def round_offset_to_page(address: int, up: bool=True) -> int:
@@ -62,9 +62,6 @@ def get_wanted_pages(data: Dict[int, int]) -> List[MapRange]:
 
     return page_mapping_list
 
-class LocationType(Enum):
-    arg = auto()
-    result = auto()
     
 class Emulator:
     def __init__(self) -> None:
@@ -113,9 +110,8 @@ class Emulator:
                     calling_conventions[self.arch][self.bitness][ida_typeinf.default_compiler()][function.calling_convention]
             except KeyError:
                 print("The current compiler has no suitable calling convention for the current architecture")
-        else:
+        elif self.arch == ida_idp.PLFM_386:
             # TODO Research how the ida_typeinf.idc_get_type_raw_works() to save decompiling and enable emulating user call without decompiler
-            arch_map = ida2unicorn_register_map[self.arch]
             func = ida_hexrays.decompile(function.start_address)
             func_data = ida_typeinf.func_type_data_t()
             func.type.get_func_details(func_data)
@@ -129,10 +125,12 @@ class Emulator:
             }
             #func.get_func_details(func_data)
             item: ida_typeinf.argloc_t = None
-            self.calling_convention[LocationType.result].append(arch_map[func_data.retloc.reg1()][func_data.rettype.get_size()])
+            self.calling_convention[LocationType.result].append(x86_x64_reg_map[func_data.retloc.reg1()][func_data.rettype.get_size()])
             for item in func_data:
                 if item.argloc.atype() == ida_typeinf.ALOC_REG1:
-                    self.calling_convention[LocationType.arg].append(arch_map[item.argloc.reg1()][item.type.get_size()])
+                    self.calling_convention[LocationType.arg].append(x86_x64_reg_map[item.argloc.reg1()][item.type.get_size()])
+        else:
+            raise ValueError("There shouldn't be a usercall in non intel platform")
 
     def __resolve_param(self, param: ParamType, content: Any):
         if param in frozenset((ParamType.INT, ParamType.UINT)):
@@ -149,8 +147,36 @@ class Emulator:
             return 8, mask_value(content, 8)
         elif param == ParamType.BYTES:
             return len(content), content.encode("ascii") + b"\0" if type(content) == str else content
-        
+        elif param == ParamType.COMPOUND:
+            size = 0
+            for param_type, _ in content:
+                if param_type == ParamType.COMPOUND:
+                    param_type, content = ParamType.INT, 0
+                param_size, _ = self.__resolve_param(param_type, content)
+                size += param_size
+            return size, None
+            
+
     def __init_param(self, index: int, param_type: ParamType, content: Any, calling_convention: List[int]) -> None:
+        if param_type == ParamType.COMPOUND:
+            saved_param = self.param_address
+            item_queue = [(self.param_address, param_type, content)]
+            while len(item_queue) > 0:
+                ea, param_type, param_content = item_queue.pop()
+                param_size, param_content = self.__resolve_param(param_type, param_content)
+                if param_type == ParamType.COMPOUND:
+                    param_size = round_offset_to_page(param_size)
+                    self.mu.mem_map(self.param_address, param_size)
+                    current_offset = 0
+                    for param_type, compound_param_content in param_content:
+                        item_queue.append((self.param_address + current_offset, param_type, compound_param_content))
+                        current_offset += self.__resolve_param(param_type, param_content)
+                    self.param_address += param_size
+                else:
+                    self.mu.mem_write(ea, param_content)
+            param_type = ParamType.UINT
+            param_content = saved_param
+
         param_size, param_content = self.__resolve_param(param_type, content)
         if index >= len(calling_convention):
             size = param_size
@@ -163,7 +189,7 @@ class Emulator:
                 self.mu.mem_write(self.param_address, param_content)
                 value = self.param_address
                 self.param_address += param_size
-                size = self.pointer_size
+                size = self.pointer_size  
             else:
                 self.out_params.append(content)
             self.mu.mem_write(self.stack_address, value.to_bytes(size, self.endianess_string))
@@ -240,279 +266,6 @@ class Emulator:
     def read_mem(self, offset: int, size: int) -> bytearray:
         return self.mu.mem_read(offset, size)
 
-arch_info = {
-    ida_idp.PLFM_386 :{
-        32:  (unicorn.UC_ARCH_X86, unicorn.UC_MODE_32, unicorn.x86_const.UC_X86_REG_ESP, 4),
-        64: (unicorn.UC_ARCH_X86, unicorn.UC_MODE_64, unicorn.x86_const.UC_X86_REG_RSP, 8)
-    },
-    ida_idp.PLFM_ARM :{
-        32: (unicorn.UC_ARCH_ARM, unicorn.UC_MODE_ARM, unicorn.arm_const.UC_ARM_REG_SP, 4),
-        64: (unicorn.UC_ARCH_ARM64, unicorn.UC_MODE_ARM, unicorn.arm64_const.UC_ARM64_REG_SP, 8)
-    },
-    ida_idp.PLFM_MIPS :{
-        32: (unicorn.UC_ARCH_MIPS, unicorn.UC_MODE_MIPS32, unicorn.mips_const.UC_MIPS_REG_SP, 4),
-        64: (unicorn.UC_ARCH_MIPS, unicorn.UC_MODE_MIPS64, unicorn.mips_const.UC_MIPS_REG_SP, 8)
-    }
-}
-
-# TODO transfer all the dicts to another python file
-calling_conventions = {
-    ida_idp.PLFM_386: {
-        32: {
-            ida_typeinf.COMP_MS: {
-                ida_typeinf.CM_CC_CDECL : {
-                    LocationType.arg :[
-                    ],
-                    LocationType.result :[
-                        unicorn.x86_const.UC_X86_REG_EAX
-                    ]
-                },
-            }
-        },
-        64: {
-            ida_typeinf.COMP_GNU: {
-                ida_typeinf.CM_CC_FASTCALL : {
-                    LocationType.arg : [
-                        unicorn.x86_const.UC_X86_REG_RDI,
-                        unicorn.x86_const.UC_X86_REG_RSI,
-                        unicorn.x86_const.UC_X86_REG_RDX,
-                        unicorn.x86_const.UC_X86_REG_RCX,
-                        unicorn.x86_const.UC_X86_REG_R8,
-                        unicorn.x86_const.UC_X86_REG_R9
-                    ],
-                    LocationType.result :[
-                        unicorn.x86_const.UC_X86_REG_RAX
-                    ]
-                }
-            },
-            ida_typeinf.COMP_MS: {
-                ida_typeinf.CM_CC_FASTCALL : {
-                    LocationType.arg :[
-                        unicorn.x86_const.UC_X86_REG_RCX,
-                        unicorn.x86_const.UC_X86_REG_RDX,
-                        unicorn.x86_const.UC_X86_REG_R8,
-                        unicorn.x86_const.UC_X86_REG_R9
-                    ],
-                    LocationType.result :[
-                        unicorn.x86_const.UC_X86_REG_RAX
-                    ]
-                },
-                ida_typeinf.CM_CC_CDECL : {
-                    LocationType.arg :[
-                        unicorn.x86_const.UC_X86_REG_RCX,
-                        unicorn.x86_const.UC_X86_REG_RDX,
-                        unicorn.x86_const.UC_X86_REG_R8,
-                        unicorn.x86_const.UC_X86_REG_R9
-                    ],
-                    LocationType.result :[
-                        unicorn.x86_const.UC_X86_REG_RAX
-                    ]
-                },
-            }
-        }
-    },
-    ida_idp.PLFM_ARM: {
-        32: {
-            ida_typeinf.COMP_GNU: {
-                ida_typeinf.CM_CC_FASTCALL : {
-                    LocationType.arg : [
-                        unicorn.arm_const.UC_ARM_REG_R0,
-                        unicorn.arm_const.UC_ARM_REG_R1,
-                        unicorn.arm_const.UC_ARM_REG_R2,
-                        unicorn.arm_const.UC_ARM_REG_R3,
-                    ],
-                    LocationType.result :[
-                        unicorn.arm_const.UC_ARM_REG_R0,
-                    ]
-                }
-            },
-        },
-        64: {
-            ida_typeinf.COMP_GNU: {
-                ida_typeinf.CM_CC_FASTCALL : {
-                    LocationType.arg : [
-                        unicorn.arm64_const.UC_ARM64_REG_X0,
-                        unicorn.arm64_const.UC_ARM64_REG_X1,
-                        unicorn.arm64_const.UC_ARM64_REG_X2,
-                        unicorn.arm64_const.UC_ARM64_REG_X3,
-                    ],
-                    LocationType.result :[
-                        unicorn.arm64_const.UC_ARM64_REG_X0,
-                    ]
-                }
-            },
-        }
-    },
-    ida_idp.PLFM_MIPS: {
-        32: {
-            ida_typeinf.COMP_GNU: {
-                ida_typeinf.CM_CC_FASTCALL : {
-                    LocationType.arg : [
-                        unicorn.mips_const.UC_MIPS_REG_A0,
-                        unicorn.mips_const.UC_MIPS_REG_A1,
-                        unicorn.mips_const.UC_MIPS_REG_A2,
-                        unicorn.mips_const.UC_MIPS_REG_A3
-                        
-                    ],
-                    LocationType.result :[
-                        unicorn.mips_const.UC_MIPS_REG_V0
-                    ]
-                },
-                ida_typeinf.CM_CC_UNKNOWN : {
-                    LocationType.arg : [
-                        unicorn.mips_const.UC_MIPS_REG_A0,
-                        unicorn.mips_const.UC_MIPS_REG_A1,
-                        unicorn.mips_const.UC_MIPS_REG_A2,
-                        unicorn.mips_const.UC_MIPS_REG_A3
-                        
-                    ],
-                    LocationType.result :[
-                        unicorn.mips_const.UC_MIPS_REG_V0
-                    ]
-                },
-                ida_typeinf.CM_CC_CDECL : {
-                    LocationType.arg : [
-                        unicorn.mips_const.UC_MIPS_REG_A0,
-                        unicorn.mips_const.UC_MIPS_REG_A1,
-                        unicorn.mips_const.UC_MIPS_REG_A2,
-                        unicorn.mips_const.UC_MIPS_REG_A3
-                        
-                    ],
-                    LocationType.result :[
-                        unicorn.mips_const.UC_MIPS_REG_V0
-                    ]
-                }
-            },
-        },
-        64: {
-            ida_typeinf.COMP_GNU: {
-                ida_typeinf.CM_CC_FASTCALL : {
-                    LocationType.arg : [
-                        unicorn.mips_const.UC_MIPS_REG_A0,
-                        unicorn.mips_const.UC_MIPS_REG_A1,
-                        unicorn.mips_const.UC_MIPS_REG_A2,
-                        unicorn.mips_const.UC_MIPS_REG_A3
-                        
-                    ],
-                    LocationType.result :[
-                        unicorn.mips_const.UC_MIPS_REG_V0
-                    ]
-                }
-            },
-        }
-    }
-}
-
-# TODO add the register mappings from ida to unicorn for arm and mips
-ida2unicorn_register_map = {
-    ida_idp.PLFM_386 : {
-        0: {
-            8: unicorn.x86_const.UC_X86_REG_RAX,
-            4: unicorn.x86_const.UC_X86_REG_EAX,
-            2: unicorn.x86_const.UC_X86_REG_AX,
-        },
-        16: {
-            1: unicorn.x86_const.UC_X86_REG_AL
-        },
-        3: {
-            8: unicorn.x86_const.UC_X86_REG_RBX,
-            4: unicorn.x86_const.UC_X86_REG_EBX,
-            2: unicorn.x86_const.UC_X86_REG_BX,
-        },
-        19: {
-            1: unicorn.x86_const.UC_X86_REG_BL
-        },
-        1: {
-            8: unicorn.x86_const.UC_X86_REG_RCX,
-            4: unicorn.x86_const.UC_X86_REG_ECX,
-            2: unicorn.x86_const.UC_X86_REG_CX,
-        },
-        17: {
-            1: unicorn.x86_const.UC_X86_REG_CL
-        },
-        2: {
-            8: unicorn.x86_const.UC_X86_REG_RDX,
-            4: unicorn.x86_const.UC_X86_REG_EDX,
-            2: unicorn.x86_const.UC_X86_REG_DX,
-        },
-        18: {
-            1: unicorn.x86_const.UC_X86_REG_DL
-        },
-        7: {
-            8: unicorn.x86_const.UC_X86_REG_RDI,
-            4: unicorn.x86_const.UC_X86_REG_EDI,
-            2: unicorn.x86_const.UC_X86_REG_DI,
-        },
-        27: {
-            1: unicorn.x86_const.UC_X86_REG_DIL,
-        },
-        6: {
-            8: unicorn.x86_const.UC_X86_REG_RSI,
-            4: unicorn.x86_const.UC_X86_REG_ESI,
-            2: unicorn.x86_const.UC_X86_REG_SI,
-        },
-        26: {
-            1: unicorn.x86_const.UC_X86_REG_SIL,
-        },
-        8: {
-            8: unicorn.x86_const.UC_X86_REG_R8,
-            4: unicorn.x86_const.UC_X86_REG_R8D,
-            2: unicorn.x86_const.UC_X86_REG_R8W,
-            1: unicorn.x86_const.UC_X86_REG_R8B,
-        },
-        9: {
-            8: unicorn.x86_const.UC_X86_REG_R9,
-            4: unicorn.x86_const.UC_X86_REG_R9D,
-            2: unicorn.x86_const.UC_X86_REG_R9W,
-            1: unicorn.x86_const.UC_X86_REG_R9B,
-        },
-        10: {
-            8: unicorn.x86_const.UC_X86_REG_R10,
-            4: unicorn.x86_const.UC_X86_REG_R10D,
-            2: unicorn.x86_const.UC_X86_REG_R10W,
-            1: unicorn.x86_const.UC_X86_REG_R10B,
-        },
-        11: {
-            8: unicorn.x86_const.UC_X86_REG_R11,
-            4: unicorn.x86_const.UC_X86_REG_R11D,
-            2: unicorn.x86_const.UC_X86_REG_R11W,
-            1: unicorn.x86_const.UC_X86_REG_R11B,
-        },
-        12: {
-            8: unicorn.x86_const.UC_X86_REG_R12,
-            4: unicorn.x86_const.UC_X86_REG_R12D,
-            2: unicorn.x86_const.UC_X86_REG_R12W,
-            1: unicorn.x86_const.UC_X86_REG_R12B,
-        },
-        13: {
-            8: unicorn.x86_const.UC_X86_REG_R13,
-            4: unicorn.x86_const.UC_X86_REG_R13D,
-            2: unicorn.x86_const.UC_X86_REG_R13W,
-            1: unicorn.x86_const.UC_X86_REG_R13B,
-        },
-        14: {
-            8: unicorn.x86_const.UC_X86_REG_R14,
-            4: unicorn.x86_const.UC_X86_REG_R14D,
-            2: unicorn.x86_const.UC_X86_REG_R14W,
-            1: unicorn.x86_const.UC_X86_REG_R14B,
-        },
-        15: {
-            8: unicorn.x86_const.UC_X86_REG_R15,
-            4: unicorn.x86_const.UC_X86_REG_R15D,
-            2: unicorn.x86_const.UC_X86_REG_R15W,
-            1: unicorn.x86_const.UC_X86_REG_R15B,
-        },
-        64: {
-            8: unicorn.x86_const.UC_X86_REG_XMM0
-        },
-        65: {
-            8: unicorn.x86_const.UC_X86_REG_XMM1
-        },
-        66: {
-            8: unicorn.x86_const.UC_X86_REG_XMM2
-        },
-    }
-}
 
 def get_emulator() -> Emulator:
     return Emulator()
