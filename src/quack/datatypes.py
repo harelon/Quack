@@ -1,3 +1,4 @@
+import ida_typeinf
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from typing import List, Any, Callable, Dict
@@ -23,7 +24,7 @@ class ParamType(Enum):
     INT = auto()
     UINT = auto()
     BYTES = auto()
-    COMPOUND = auto()
+    STRUCT = auto()
     
     @property
     def is_signed(self) -> bool:
@@ -78,5 +79,5 @@ class Test:
     
 @dataclass
 class Tests:
-    prototype: FunctionPrototype
+    prototype: ida_typeinf.func_type_data_t
     tests: List[Test] = field(default_factory=list)

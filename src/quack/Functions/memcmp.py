@@ -1,9 +1,9 @@
 from os.path import basename
 from typing import List, Any
 from quack.test_manager import RegisterTester, TestWrapper
-from quack.datatypes import ParamType, FunctionPrototype, Pointer
+from quack.datatypes import Pointer
 
-tester = RegisterTester(basename(__file__)[:-3], FunctionPrototype(ParamType.INT8, [ParamType.BYTES, ParamType.BYTES, ParamType.UINT]))
+tester = RegisterTester(basename(__file__)[:-3], "int memcmp(const void *str1, const void *str2, size_t n);")
 
 @TestWrapper(tester, [("asdf", "asdf", 4)])
 def test_same(result, params: Any, outs: List[Pointer | None]):

@@ -1,9 +1,9 @@
 from os.path import basename
 from typing import List, Any
 from quack.test_manager import RegisterTester, TestWrapper
-from quack.datatypes import ParamType, FunctionPrototype, Pointer
+from quack.datatypes import Pointer
 
-tester = RegisterTester(basename(__file__)[:-3], FunctionPrototype(ParamType.UINT, [ParamType.BYTES, ParamType.BYTES]))
+tester = RegisterTester(basename(__file__)[:-3], "char *strstr(const char *haystack, const char *needle);")
 
 @TestWrapper(tester, [("Hello, World!", "World"), ("Programming is fun!", "is"), ("Mississippi", "ss")])
 def test_bytes(result, params: Any, outs: List[Pointer | None]):

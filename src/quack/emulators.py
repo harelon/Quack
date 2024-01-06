@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 from quack.unicorn_2_ida_consts import calling_conventions, x86_x64_reg_map, arch_info, LocationType
-from quack.datatypes import Function, ParamType, FunctionPrototype, Pointer
+from quack.datatypes import Function, Pointer
 
 def round_offset_to_page(address: int, up: bool=True) -> int:
     return 4096 * (round(address//4096) + (1 if up else 0))
@@ -73,13 +73,14 @@ class Emulator:
         self.endianess_string = "big" if self.endianess else "little"
         # TODO init global offset table for mips
         # TODO Map imports to zero
-        # TODO implement usercall
+        # TODO implement memcpy and memcmp for use instead of imports
         self.mu: unicorn.Uc = unicorn.Uc(unicorn_arch, mode | (unicorn.UC_MODE_BIG_ENDIAN if self.endianess else unicorn.UC_MODE_LITTLE_ENDIAN))
         self.param_address = 0x1000_0000
         self.stack_address = 0x2000_0000
         self.mapped_vars: List[int, int] = []
+        self.stack_size = 4096 * 10
         self.mu.mem_map(self.stack_address, 4096 * 10)
-        self.stack_address = self.stack_address + 4096 * 5
+        self.stack_pointer = self.stack_address + 4096 * 5
     
     @contextmanager
     def init_function(self, function: Function) -> None:
@@ -131,57 +132,48 @@ class Emulator:
                     self.calling_convention[LocationType.arg].append(x86_x64_reg_map[item.argloc.reg1()][item.type.get_size()])
         else:
             raise ValueError("There shouldn't be a usercall in non intel platform")
-
-    def __resolve_param(self, param: ParamType, content: Any):
-        if param in frozenset((ParamType.INT, ParamType.UINT)):
-            return self.pointer_size, mask_value(content, self.pointer_size)
-        elif param == ParamType.VOID:
-            return 0, None
-        elif param in frozenset((ParamType.INT8, ParamType.UINT8)):
-            return 1, mask_value(content, 1)
-        elif param in frozenset((ParamType.INT16, ParamType.UINT16)):
-            return 2, mask_value(content, 2)
-        elif param in frozenset((ParamType.INT32, ParamType.UINT32)):
-            return 4, mask_value(content, 4)
-        elif param in frozenset((ParamType.INT64, ParamType.UINT64)):
-            return 8, mask_value(content, 8)
-        elif param == ParamType.BYTES:
-            return len(content), content.encode("ascii") + b"\0" if type(content) == str else content
-        elif param == ParamType.COMPOUND:
-            size = 0
-            for param_type, _ in content:
-                if param_type == ParamType.COMPOUND:
-                    param_type, content = ParamType.INT, 0
-                param_size, _ = self.__resolve_param(param_type, content)
-                size += param_size
-            return size, None
             
 
-    def __init_param(self, index: int, param_type: ParamType, content: Any, calling_convention: List[int]) -> None:
-        if param_type == ParamType.COMPOUND:
-            saved_param = self.param_address
-            item_queue = [(self.param_address, param_type, content)]
-            while len(item_queue) > 0:
-                ea, param_type, param_content = item_queue.pop()
-                param_size, param_content = self.__resolve_param(param_type, param_content)
-                if param_type == ParamType.COMPOUND:
-                    param_size = round_offset_to_page(param_size)
-                    self.mu.mem_map(self.param_address, param_size)
-                    current_offset = 0
-                    for param_type, compound_param_content in param_content:
-                        item_queue.append((self.param_address + current_offset, param_type, compound_param_content))
-                        current_offset += self.__resolve_param(param_type, param_content)
-                    self.param_address += param_size
-                else:
-                    self.mu.mem_write(ea, param_content)
-            param_type = ParamType.UINT
-            param_content = saved_param
+    def __init_param(self, index: int, param_type: ida_typeinf.tinfo_t, content: Any, calling_convention: List[int]) -> None:
+        allocated = False
+        if param_type.is_ptr():
+            allocated = True
+            # char_ptr_tinfo = ida_typeinf.tinfo_t()
+            # ida_typeinf.get_stock_tinfo(char_ptr_tinfo, ida_typeinf.STI_PCHAR)
+            # ignore the const and volatile modifiers
+            # param_type.compare_with(char_ptr_tinfo, ida_typeinf.TCMP_IGNMODS) and
+            param_size = len(content)
+            param_content = content
+            if type(param_content) == str:
+                param_content = param_content.encode("ascii") + b"\0"   
+        else:
+            param_content = content
+            param_size = param_type.get_size()
+        # if param_type == ParamType.STRUCT:
+        #     saved_param = self.param_address
+        #     item_queue = [(self.param_address, param_type, content)]
+        #     while len(item_queue) > 0:
+        #         ea, param_type, param_content = item_queue.pop()
+        #         param_size, param_content = self.__resolve_param(param_type, param_content)
+        #         if param_type == ParamType.STRUCT:
+        #             param_size = round_offset_to_page(param_size)
+        #             self.mu.mem_map(self.param_address, param_size)
+        #             current_offset = 0
+        #             for param_type, compound_param_content in param_content:
+        #                 item_queue.append((self.param_address + current_offset, param_type, compound_param_content))
+        #                 current_offset += self.__resolve_param(param_type, param_content)
+        #             self.param_address += param_size
+        #         else:
+        #             self.mu.mem_write(ea, param_content)
+        #     param_type = ParamType.UINT
+        #     param_content = saved_param
 
-        param_size, param_content = self.__resolve_param(param_type, content)
+        #param_size, param_content = self.__resolve_param(param_type, content)
+        # print(param_content)
         if index >= len(calling_convention):
             size = param_size
             value = param_content
-            if param_type == ParamType.BYTES:
+            if allocated:
                 param_size = round_offset_to_page(param_size)
                 self.mu.mem_map(self.param_address, param_size)
                 self.mapped_vars.append((self.param_address, param_size))
@@ -192,11 +184,11 @@ class Emulator:
                 size = self.pointer_size  
             else:
                 self.out_params.append(content)
-            self.mu.mem_write(self.stack_address, value.to_bytes(size, self.endianess_string))
-            self.stack_address += self.pointer_size
+            self.mu.mem_write(self.stack_pointer, value.to_bytes(size, self.endianess_string))
+            self.stack_pointer += self.pointer_size
         else:
             current_param_reg: int = calling_convention[index]
-            if param_type == ParamType.BYTES:
+            if allocated:
                 param_size = round_offset_to_page(param_size)
                 self.mu.mem_map(self.param_address, param_size)
                 self.mapped_vars.append((self.param_address, param_size))
@@ -209,24 +201,35 @@ class Emulator:
                 self.mu.reg_write(current_param_reg, param_content)
 
     @contextmanager
-    def run(self, prototype: FunctionPrototype, params: List[Any]) -> None:
+    def run(self, prototype: ida_typeinf.func_type_data_t, params: List[Any]) -> None:
         try:
             self.result = 0
             self.out_params: List[Any] = []
             self.params = params
-            original_stack_address = self.stack_address
+            original_stack_pointer = self.stack_pointer
             for i, param in enumerate(params):
-                self.__init_param(i, prototype[i], param, self.calling_convention[LocationType.arg])
-            stack_size = self.stack_address - original_stack_address
+                self.__init_param(i, prototype[i].type, param, self.calling_convention[LocationType.arg])
             try:
                 # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RDI)))
                 # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RSI)))
+                # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RCX)))
                 # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RDX)))
+                # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_R8)))
                 # rsi_reg = self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RSI)
+                # rcx_reg = self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RCX)
+                # rdx_reg = self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RDX)
+                
                 # print(hex(rsi_reg))
-                # print(self.mu.mem_read(rsi_reg, 3))
+                # print(self.mu.mem_read(rcx_reg, 5))
                 # print("starting emulator")
-                self.mu.reg_write(self.stack_register, original_stack_address - self.pointer_size)
+                
+                self.mu.reg_write(self.stack_register, original_stack_pointer - self.pointer_size)
+                # stack_reg = self.mu.reg_read(self.stack_register)
+                # print(hex(stack_reg))
+                # print(self.mu.mem_read(stack_reg, 0x48))
+                # print(self.mu.mem_read(stack_reg, 0x10))
+                # print(self.mu.mem_read(int.from_bytes(b"\x00\x00\x00\x10", "little"), 0x10))
+                # print(self.mu.mem_read(int.from_bytes(b"\x00\x10\x00\x10", "little"), 0x10))
                 # print(hex(self.function.start_address))
                 # print(self.mu.mem_read(self.function.start_address, 0x40))
                 self.mu.emu_start(self.function.start_address, -1)
@@ -248,9 +251,12 @@ class Emulator:
                 pass
             reg = self.calling_convention[LocationType.result][0]
             self.result = self.mu.reg_read(reg)
-            if prototype.return_type.is_signed:
-                size, value = self.__resolve_param(prototype.return_type, self.result)
-                self.result = value | (-(value & 0x80 << (8 * (size - 1))))
+            rettype = prototype.rettype
+            if rettype.is_signed():
+                size = rettype.get_size()
+                value_mask = (1 << ((size * 8) + 1)) - 1
+                self.result &= value_mask
+                self.result = self.result | (-(self.result & 0x80 << (8 * (size - 1))))
             yield
         finally:
             self.result = 0
@@ -259,8 +265,8 @@ class Emulator:
             for mapped_var in self.mapped_vars:
                 self.mu.mem_unmap(*mapped_var)
             self.mapped_vars.clear()
-            self.mu.mem_write(original_stack_address, b"\x00" * stack_size)
-            self.stack_address = original_stack_address
+            self.mu.mem_write(self.stack_address, b"\x00" * self.stack_size)
+            self.stack_pointer = original_stack_pointer
             self.param_address = 0x1000_0000
     
     def read_mem(self, offset: int, size: int) -> bytearray:

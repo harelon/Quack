@@ -1,5 +1,3 @@
-from quack import test_manager, datatypes, emulators
-
 from idc import BADADDR
 import ida_ua
 import ida_xref
@@ -21,14 +19,17 @@ def get_string_list_count(string_list: bytes):
     return string_counter
 
 class QuackPlugin(ida_idaapi.plugin_t):
-    flags = 0
+    flags = ida_idaapi.PLUGIN_FIX
     max_depth = 2
     wanted_name = "Quack"
     wanted_hotkey = "Shift-Q"
     
     def init(self):
-        self.__manager = test_manager.TestManager()
-        self.emulator = emulators.get_emulator()
+        def import_deps(code, old=0):
+            from quack import test_manager, emulators
+            self.__manager: test_manager.TestManager = test_manager.TestManager()
+            self.emulator = emulators.get_emulator()
+        ida_idaapi.notify_when(ida_idaapi.NW_OPENIDB, import_deps)
         return ida_idaapi.PLUGIN_KEEP
 
     def __generate_memory_mappings(self, current_func: ida_funcs.func_t) -> Dict[int, bytes] | None:
@@ -42,11 +43,13 @@ class QuackPlugin(ida_idaapi.plugin_t):
             ea = current_item.start_ea
             if ea in memory_mappings.keys():
                 continue
-            current_tails = current_item.tails
-            if None in current_tails:
-                print("Cannot calculate function dependencies, please reanalyze program")
-                return None
-            tails = {} if not is_func else {tail.start_ea: tail for tail in current_tails}
+            tails = {}
+            if is_func:
+                current_tails = current_item.tails
+                if None in current_tails:
+                    print("Cannot calculate function dependencies, please reanalyze program")
+                    return None
+                tails = {tail.start_ea: tail for tail in current_tails}
             current_disas = ea
             while current_disas < current_item.end_ea:
                 data = ida_xref.get_first_dref_from(current_disas)
@@ -75,6 +78,7 @@ class QuackPlugin(ida_idaapi.plugin_t):
         return memory_mappings
 
     def run(self, arg):
+        from quack import datatypes
         current_ea = ida_kernwin.get_screen_ea()
         current_func: ida_funcs.func_t = ida_funcs.get_func(current_ea)
         if current_func is None:
