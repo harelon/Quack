@@ -84,7 +84,7 @@ class Emulator:
     
     @contextmanager
     def init_function(self, function: Function) -> None:
-        memory_mappings: List[Tuple(int, int)] = []
+        memory_mappings: List[Tuple[int, int]] = []
         try:
             self.param_counter = 0
             self.function = function
@@ -126,10 +126,12 @@ class Emulator:
             }
             #func.get_func_details(func_data)
             item: ida_typeinf.argloc_t = None
-            self.calling_convention[LocationType.result].append(x86_x64_reg_map[func_data.retloc.reg1()][func_data.rettype.get_size()])
+            regname = ida_idp.get_reg_name(func_data.retloc.reg1(), 8)
+            self.calling_convention[LocationType.result].append(x86_x64_reg_map[regname][func_data.rettype.get_size()])
             for item in func_data:
                 if item.argloc.atype() == ida_typeinf.ALOC_REG1:
-                    self.calling_convention[LocationType.arg].append(x86_x64_reg_map[item.argloc.reg1()][item.type.get_size()])
+                    item_regname = ida_idp.get_reg_name(item.argloc.reg1(), 8)
+                    self.calling_convention[LocationType.arg].append(x86_x64_reg_map[item_regname][item.type.get_size()])
         else:
             raise ValueError("There shouldn't be a usercall in non intel platform")
             

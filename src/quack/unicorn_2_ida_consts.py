@@ -35,7 +35,7 @@ windows_x64_fastcall = {
     ]
 }
 
-default_x86_cdecl = {
+default_x86_return_regs = {
     LocationType.arg :[
     ],
     LocationType.result :[
@@ -84,7 +84,8 @@ calling_conventions = {
     ida_idp.PLFM_386: {
         32: {
             ida_typeinf.COMP_MS: {
-                ida_typeinf.CM_CC_CDECL : default_x86_cdecl
+                ida_typeinf.CM_CC_CDECL : default_x86_return_regs,
+                ida_typeinf.CM_CC_STDCALL : default_x86_return_regs
             }
         },
         64: {
@@ -93,7 +94,8 @@ calling_conventions = {
             },
             ida_typeinf.COMP_MS: {
                 ida_typeinf.CM_CC_FASTCALL : windows_x64_fastcall,
-                ida_typeinf.CM_CC_CDECL : windows_x64_fastcall
+                ida_typeinf.CM_CC_CDECL : windows_x64_fastcall,
+                ida_typeinf.CM_CC_STDCALL : windows_x64_fastcall
             }
         }
     },
@@ -126,109 +128,97 @@ calling_conventions = {
 }
 
 x86_x64_reg_map = {
-        0: {
+        "rax": {
             8: unicorn.x86_const.UC_X86_REG_RAX,
             4: unicorn.x86_const.UC_X86_REG_EAX,
             2: unicorn.x86_const.UC_X86_REG_AX,
-        },
-        16: {
             1: unicorn.x86_const.UC_X86_REG_AL
         },
-        3: {
+        "rbx": {
             8: unicorn.x86_const.UC_X86_REG_RBX,
             4: unicorn.x86_const.UC_X86_REG_EBX,
             2: unicorn.x86_const.UC_X86_REG_BX,
-        },
-        19: {
             1: unicorn.x86_const.UC_X86_REG_BL
         },
-        1: {
+        "rcx": {
             8: unicorn.x86_const.UC_X86_REG_RCX,
             4: unicorn.x86_const.UC_X86_REG_ECX,
             2: unicorn.x86_const.UC_X86_REG_CX,
-        },
-        17: {
             1: unicorn.x86_const.UC_X86_REG_CL
         },
-        2: {
+        "rdx": {
             8: unicorn.x86_const.UC_X86_REG_RDX,
             4: unicorn.x86_const.UC_X86_REG_EDX,
             2: unicorn.x86_const.UC_X86_REG_DX,
-        },
-        18: {
             1: unicorn.x86_const.UC_X86_REG_DL
         },
-        7: {
+        "rdi": {
             8: unicorn.x86_const.UC_X86_REG_RDI,
             4: unicorn.x86_const.UC_X86_REG_EDI,
             2: unicorn.x86_const.UC_X86_REG_DI,
-        },
-        27: {
             1: unicorn.x86_const.UC_X86_REG_DIL,
         },
-        6: {
+        "rsi": {
             8: unicorn.x86_const.UC_X86_REG_RSI,
             4: unicorn.x86_const.UC_X86_REG_ESI,
             2: unicorn.x86_const.UC_X86_REG_SI,
-        },
-        26: {
             1: unicorn.x86_const.UC_X86_REG_SIL,
         },
-        8: {
+        "r8": {
             8: unicorn.x86_const.UC_X86_REG_R8,
             4: unicorn.x86_const.UC_X86_REG_R8D,
             2: unicorn.x86_const.UC_X86_REG_R8W,
             1: unicorn.x86_const.UC_X86_REG_R8B,
         },
-        9: {
+        "r9": {
             8: unicorn.x86_const.UC_X86_REG_R9,
             4: unicorn.x86_const.UC_X86_REG_R9D,
             2: unicorn.x86_const.UC_X86_REG_R9W,
             1: unicorn.x86_const.UC_X86_REG_R9B,
         },
-        10: {
+        "r10": {
             8: unicorn.x86_const.UC_X86_REG_R10,
             4: unicorn.x86_const.UC_X86_REG_R10D,
             2: unicorn.x86_const.UC_X86_REG_R10W,
             1: unicorn.x86_const.UC_X86_REG_R10B,
         },
-        11: {
+        "r11": {
             8: unicorn.x86_const.UC_X86_REG_R11,
             4: unicorn.x86_const.UC_X86_REG_R11D,
             2: unicorn.x86_const.UC_X86_REG_R11W,
             1: unicorn.x86_const.UC_X86_REG_R11B,
         },
-        12: {
+        "r12": {
             8: unicorn.x86_const.UC_X86_REG_R12,
             4: unicorn.x86_const.UC_X86_REG_R12D,
             2: unicorn.x86_const.UC_X86_REG_R12W,
             1: unicorn.x86_const.UC_X86_REG_R12B,
         },
-        13: {
+        "r13": {
             8: unicorn.x86_const.UC_X86_REG_R13,
             4: unicorn.x86_const.UC_X86_REG_R13D,
             2: unicorn.x86_const.UC_X86_REG_R13W,
             1: unicorn.x86_const.UC_X86_REG_R13B,
         },
-        14: {
+        "r14": {
             8: unicorn.x86_const.UC_X86_REG_R14,
             4: unicorn.x86_const.UC_X86_REG_R14D,
             2: unicorn.x86_const.UC_X86_REG_R14W,
             1: unicorn.x86_const.UC_X86_REG_R14B,
         },
-        15: {
+        "r15": {
             8: unicorn.x86_const.UC_X86_REG_R15,
             4: unicorn.x86_const.UC_X86_REG_R15D,
             2: unicorn.x86_const.UC_X86_REG_R15W,
             1: unicorn.x86_const.UC_X86_REG_R15B,
         },
-        64: {
+        "xmm0": {
             8: unicorn.x86_const.UC_X86_REG_XMM0
         },
-        65: {
+        "xmm1": {
             8: unicorn.x86_const.UC_X86_REG_XMM1
         },
-        66: {
+        "xmm2": {
             8: unicorn.x86_const.UC_X86_REG_XMM2
         },
 }

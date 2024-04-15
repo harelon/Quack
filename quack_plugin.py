@@ -68,7 +68,9 @@ class QuackPlugin(ida_idaapi.plugin_t):
                                 iterate_parts.append((depth, False, tails[cref]))
                             # add 1 to depth if it is not a tail and insert the function to the list
                             else:
-                                iterate_parts.append((depth + 1, True, ida_funcs.get_func(cref)))
+                                func = ida_funcs.get_func(cref)
+                                if func is not None:
+                                    iterate_parts.append((depth + 1, True, func))
                         cref = ida_xref.get_next_cref_from(current_disas, cref)
 
                 current_disas += ida_ua.decode_insn(current_insn, current_disas)
@@ -95,7 +97,7 @@ class QuackPlugin(ida_idaapi.plugin_t):
                 args_count = func_data.size()
                 cc = func_data.cc & ida_typeinf.CM_CC_MASK
             else:
-                print(f"no prototype initialized for function 0x{current_func.start_ea:x} and no decompiler")
+                print(f"No prototype initialized for function 0x{current_func.start_ea:x} and no decompiler")
                 return 0
         # use the cached version
         else:
