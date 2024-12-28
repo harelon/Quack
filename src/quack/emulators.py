@@ -90,7 +90,6 @@ class Emulator:
             self.function = function
             mappings = get_wanted_pages({address: len(content) for address, content in function.memory_mappings.items()})
             #print([hex(map.start) + " " + hex(map.end) for map in  mappings])
-            #print({hex(key): len(value) for key, value in function.memory_mappings.items()})
             for map in mappings:
                 size = map.end - map.start
                 memory_mappings.append((map.start, size))
@@ -124,7 +123,6 @@ class Emulator:
 
                 ]
             }
-            #func.get_func_details(func_data)
             item: ida_typeinf.argloc_t = None
             regname = ida_idp.get_reg_name(func_data.retloc.reg1(), 8)
             self.calling_convention[LocationType.result].append(x86_x64_reg_map[regname][func_data.rettype.get_size()])
@@ -140,10 +138,6 @@ class Emulator:
         allocated = False
         if param_type.is_ptr():
             allocated = True
-            # char_ptr_tinfo = ida_typeinf.tinfo_t()
-            # ida_typeinf.get_stock_tinfo(char_ptr_tinfo, ida_typeinf.STI_PCHAR)
-            # ignore the const and volatile modifiers
-            # param_type.compare_with(char_ptr_tinfo, ida_typeinf.TCMP_IGNMODS) and
             param_size = len(content)
             param_content = content
             if type(param_content) == str:
@@ -151,27 +145,6 @@ class Emulator:
         else:
             param_content = content
             param_size = param_type.get_size()
-        # if param_type == ParamType.STRUCT:
-        #     saved_param = self.param_address
-        #     item_queue = [(self.param_address, param_type, content)]
-        #     while len(item_queue) > 0:
-        #         ea, param_type, param_content = item_queue.pop()
-        #         param_size, param_content = self.__resolve_param(param_type, param_content)
-        #         if param_type == ParamType.STRUCT:
-        #             param_size = round_offset_to_page(param_size)
-        #             self.mu.mem_map(self.param_address, param_size)
-        #             current_offset = 0
-        #             for param_type, compound_param_content in param_content:
-        #                 item_queue.append((self.param_address + current_offset, param_type, compound_param_content))
-        #                 current_offset += self.__resolve_param(param_type, param_content)
-        #             self.param_address += param_size
-        #         else:
-        #             self.mu.mem_write(ea, param_content)
-        #     param_type = ParamType.UINT
-        #     param_content = saved_param
-
-        #param_size, param_content = self.__resolve_param(param_type, content)
-        # print(param_content)
         if index >= len(calling_convention):
             size = param_size
             value = param_content
@@ -212,44 +185,9 @@ class Emulator:
             for i, param in enumerate(params):
                 self.__init_param(i, prototype[i].type, param, self.calling_convention[LocationType.arg])
             try:
-                # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RDI)))
-                # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RSI)))
-                # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RCX)))
-                # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RDX)))
-                # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_R8)))
-                # rsi_reg = self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RSI)
-                # rcx_reg = self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RCX)
-                # rdx_reg = self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RDX)
-                
-                # print(hex(rsi_reg))
-                # print(self.mu.mem_read(rcx_reg, 5))
-                # print("starting emulator")
-                
                 self.mu.reg_write(self.stack_register, original_stack_pointer - self.pointer_size)
-                # stack_reg = self.mu.reg_read(self.stack_register)
-                # print(hex(stack_reg))
-                # print(self.mu.mem_read(stack_reg, 0x48))
-                # print(self.mu.mem_read(stack_reg, 0x10))
-                # print(self.mu.mem_read(int.from_bytes(b"\x00\x00\x00\x10", "little"), 0x10))
-                # print(self.mu.mem_read(int.from_bytes(b"\x00\x10\x00\x10", "little"), 0x10))
-                # print(hex(self.function.start_address))
-                # print(self.mu.mem_read(self.function.start_address, 0x40))
                 self.mu.emu_start(self.function.start_address, -1)
             except unicorn.UcError as e:
-                # print(e)
-                # print(hex(self.function.address))
-                # 0xa8eb0
-                # rsi_reg = self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RSI)
-                # print(hex(rsi_reg))
-                # print(self.mu.mem_read(rsi_reg, 3))
-                #rip_reg = self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RIP)
-                # rip_reg = self.mu.reg_read(unicorn.mips_const.UC_MIPS_REG_PC)
-                # print(hex(rip_reg))
-                # reg_result = self.mu.reg_read(unicorn.mips_const.UC_MIPS_REG_V0)
-                # print(hex(reg_result))
-                #print(self.mu.mem_read(rip_reg, 3))
-                # print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RCX)))
-                #print(hex(self.mu.reg_read(unicorn.x86_const.UC_X86_REG_RAX)))
                 pass
             reg = self.calling_convention[LocationType.result][0]
             self.result = self.mu.reg_read(reg)
