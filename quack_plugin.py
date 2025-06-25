@@ -27,7 +27,7 @@ class QuackPlugin(ida_idaapi.plugin_t):
     def init(self):
         def import_deps(code, old=0):
             from quack import test_manager, emulators
-            self.__manager: test_manager.TestManager = test_manager.TestManager()
+            self.__manager = test_manager.TestManager()
             self.emulator = emulators.get_emulator()
         ida_idaapi.notify_when(ida_idaapi.NW_OPENIDB, import_deps)
         return ida_idaapi.PLUGIN_KEEP

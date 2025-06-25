@@ -1,9 +1,15 @@
 import unicorn
 
+import ida_pro
 import ida_idp
 import ida_idaapi
 import ida_hexrays
 import ida_typeinf
+
+if ida_pro.IDA_SDK_VERSION < 850:
+    pass
+else:
+    import ida_ida
 
 from typing import List, Dict, Tuple, Any
 from contextlib import contextmanager
@@ -65,11 +71,16 @@ def get_wanted_pages(data: Dict[int, int]) -> List[MapRange]:
     
 class Emulator:
     def __init__(self) -> None:
-        inf_struct = ida_idaapi.get_inf_structure()
-        self.bitness = 64 if inf_struct.is_64bit() else (32 if inf_struct.is_32bit() else 16)
+        if ida_pro.IDA_SDK_VERSION < 850:
+            inf_struct = ida_idaapi.get_inf_structure()
+            self.bitness = 64 if inf_struct.is_64bit() else (32 if inf_struct.is_32bit() else 16)
+            self.endianess = inf_struct.is_be()
+        else:
+            self.bitness = 64 if ida_ida.inf_is_64bit() else (32 if ida_ida.inf_is_32bit_exactly() else 16)
+            self.endianess = ida_ida.inf_is_be()
+
         self.arch = ida_idp.ph_get_id()
         unicorn_arch, mode, self.stack_register, self.pointer_size = arch_info[self.arch][self.bitness]
-        self.endianess = inf_struct.is_be()
         self.endianess_string = "big" if self.endianess else "little"
         # TODO init global offset table for mips
         # TODO Map imports to zero
